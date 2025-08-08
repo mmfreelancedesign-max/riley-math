@@ -17,13 +17,13 @@
   window.addEventListener('error', function(e){
     try{
       const m = e && (e.message || (e.error && e.error.message));
-      if(matchesMM(m)){ e.preventDefault(); e.stopImmediatePropagation?.(); }
+      if(matchesMM(m)){ e.preventDefault(); if (e && typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation(); }
     }catch(_){}
   }, {capture:true});
   window.addEventListener('unhandledrejection', function(e){
     try{
       const r = e && (e.reason && (e.reason.message||e.reason));
-      if(matchesMM(r)){ e.preventDefault(); e.stopImmediatePropagation?.(); }
+      if(matchesMM(r)){ e.preventDefault(); if (e && typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation(); }
     }catch(_){}
   }, {capture:true});
   // Soft-disable auto wallet prompts inside sandboxed UIs to avoid crashes
@@ -147,6 +147,15 @@
     .sticker-wrap{ grid-template-columns:1fr; }
   }
 </style>
+<script>
+// If opened directly from the file system, relax CSP so inline JS/CSS and WebAudio work reliably on older browsers.
+try{
+  if(location.protocol === 'file:'){
+    var m = document.querySelector("meta[http-equiv='Content-Security-Policy']");
+    if(m){ m.setAttribute('content', "default-src 'self' 'unsafe-inline' data: blob: filesystem:; script-src 'self' 'unsafe-inline' data: blob: filesystem:; style-src 'self' 'unsafe-inline' data: blob: filesystem:; img-src * data: blob: filesystem:; media-src * data: blob: filesystem:; font-src 'self' data: blob: filesystem:; connect-src 'self' data: blob: filesystem:"); }
+  }
+}catch(_){/* ignore */}
+</script>
 </head>
 <body>
 <canvas id="confetti"></canvas>
@@ -334,6 +343,10 @@
    ============================ */
 (function(){
   "use strict";
+  // Polyfill for older browsers (Edge Legacy) that lack structuredClone
+  if (typeof window.structuredClone !== 'function') {
+    window.structuredClone = function(obj){ try { return JSON.parse(JSON.stringify(obj)); } catch(e){ return obj; } };
+  }
   // --- Utilities ---
   const $ = sel => document.querySelector(sel);
   const $$ = sel => Array.from(document.querySelectorAll(sel));
@@ -391,7 +404,7 @@
       return structuredClone(DEFAULT_PROGRESS);
     }
   }
-  function saveProgress(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(progress)); }
+  let __storageWarned = false; function saveProgress(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(progress)); } catch(e){ console.warn('localStorage write failed (memory-only mode):', e); if(!__storageWarned){ __storageWarned = true; Toast.show("Heads up: this browser won't save progress. Try another browser or use the GitHub Pages link."); } } }
   function addTime(sec){
     const key=todayStr();
     if(!progress.days[key]) progress.days[key] = { timeSpent:0, topics:{}, score:0 };
@@ -525,7 +538,12 @@
   $('#btnToggleSound').addEventListener('click', ()=>{ progress.settings.muted=!progress.settings.muted; saveProgress(); updateHeader(); });
   $('#btnToggleTTS').addEventListener('click', ()=>{ progress.settings.tts=!progress.settings.tts; saveProgress(); updateHeader(); });
   $('#btnChime').addEventListener('click', playHuntrixChime);
-  $('#btnReset').addEventListener('click', ()=>{ if(confirm('Reset all progress, stars, stickers, and badges?')){ localStorage.removeItem(STORAGE_KEY); location.reload(); } });
+  $('#btnReset').addEventListener('click', function(){
+    if(confirm('Reset all progress, stars, stickers, and badges?')){
+      try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
+      location.reload();
+    }
+  }); } });
   $('#btnDiag').addEventListener('click', ()=>{ $('#diagModal').classList.add('show'); });
   $('#btnCloseDiag').addEventListener('click', ()=>{ $('#diagModal').classList.remove('show'); });
   function buildHTML(){ return '<!DOCTYPE html>' + document.documentElement.outerHTML; }
@@ -725,86 +743,3 @@
       const row=document.createElement('div'); row.className='row'; row.style.justifyContent='center'; row.appendChild(inp); row.appendChild(go); ui.appendChild(row);
       setTimeout(()=> inp.focus(), 100);
     }
-  }
-
-  function submitAnswer(val){
-    if(!current.allowAnswer) return; current.allowAnswer=false;
-    const q=current.question; const correct = (String(val)===String(q.answer));
-    saveTopic(current.topic, { deltaAttempts:1, deltaCorrect: correct?1:0 });
-    current.attempts++; if(correct) current.correct++;
-    handleDifficulty(current.topic, correct);
-    if(correct){ sCorrect(); confetti.burst(40); speak(randPraise()); }
-    else { sWrong(); }
-
-    if(q.explain){ $('#hintBox').classList.remove('hide'); $('#hintBox').innerHTML = (correct? 'Great! ':'Almost! ') + q.explain; }
-    if(current.qIndex>=sessionSize){ setTimeout(endSession, 400); }
-    else { setTimeout(()=>{ current.allowAnswer=true; nextQuestion(); }, correct? 350 : 500); }
-    updateHeader(); saveProgress();
-  }
-
-  function showHint(){ const q=current.question; if(!q) return; const box=$('#hintBox'); box.classList.remove('hide'); box.innerHTML = q.hint || 'Try your best! Count in steps, use your fingers, or break into tens.'; }
-  function showExplain(){ const q=current.question; if(!q) return; const box=$('#hintBox'); box.classList.remove('hide'); box.innerHTML = q.explain || 'Think about the steps: read the question, spot the operation, solve carefully.'; }
-  function randPraise(){ const arr=['Great job, Riley!','Nice work!','You rock, Riley!','Fantastic!','Brilliant!','High five!','Mic drop!','Encore!','Dance break!','Bella is proud!']; return arr[rand(arr.length)]; }
-
-  function handleDifficulty(topic, correct){
-    const d = progress.difficulty[topic]||1; const key=`diff_${topic}`; progress[key] = progress[key]||{ streak:0, miss:0 };
-    if(correct){ progress[key].streak++; progress[key].miss=0; }
-    else { progress[key].miss++; progress[key].streak=0; }
-    if(progress[key].streak>=3){ progress.difficulty[topic]=clamp(d+1,1,5); progress[key].streak=0; awardBadge('Level Up'); }
-    if(progress[key].miss>=2){ progress.difficulty[topic]=clamp(d-1,1,5); progress[key].miss=0; }
-    saveProgress();
-  }
-
-  function awardBadge(name){ if(progress.badges.includes(name)) return; progress.badges.push(name); saveProgress(); updateHeader(); }
-
-  // --- Question Generators ---
-  function generateQuestion(topic, diff){
-    switch(topic){
-      case 'arithmetic': return qArithmetic(diff);
-      case 'bonds': return qBonds(diff);
-      case 'place': return qPlace(diff);
-      case 'tables': return qTables(diff);
-      case 'words': return qWord(diff);
-      default: return qArithmetic(1);
-    }
-  }
-
-  function qArithmetic(diff){
-    const ops = diff<=2? ['+','-'] : diff===3? ['+','-','×'] : ['+','-','×','÷'];
-    const op = ops[rand(ops.length)];
-    let a,b,ans,text,explain,hint;
-    const limit = diff<=2? 20 : diff===3? 50 : 100;
-    if(op==='+'){ a=rand(limit+1); b=rand(limit+1-a); ans=a+b; text=`What is ${a} + ${b}?`; hint=`Add the ones first: ${a%10} + ${b%10}.`; explain=`${a} + ${b} = ${ans}.`; }
-    if(op==='-'){ a=rand(limit+1); b=rand(a+1); ans=a-b; text=`What is ${a} − ${b}?`; hint=`Count back ${b} from ${a}.`; explain=`${a} - ${b} = ${ans}.`; }
-    if(op==='×'){ do { a=clamp(rand(12),1,12); b=clamp(rand(12),1,12); ans=a*b; } while(ans>100); text=`What is ${a} × ${b}?`; hint=`Count in ${a} groups, ${b} times.`; explain=`${a} × ${b} means ${b} groups of ${a}.`; }
-    if(op==='÷'){ do { b=clamp(rand(12),1,12); ans=clamp(rand(12),1,12); a=b*ans; } while(a>100); text=`What is ${a} ÷ ${b}?`; hint=`How many ${b}s fit into ${a}?`; explain=`${a} ÷ ${b} = ${ans} because ${b} × ${ans} = ${a}.`; }
-    const choices = makeChoices(ans);
-    return { text, answer: ans, choices, hint, explain, say:text };
-  }
-
-  function qBonds(diff){
-    const target = diff<=2? (diff===1?10:20) : diff===3? 50 : 100;
-    const a = rand(target); const ans = target - a;
-    const text = `Number bonds to ${target}: What goes with ${a} to make ${target}?`;
-    const hint = `Think: ${a} + ? = ${target}. Count up from ${a} to ${target}.`;
-    const explain = `${a} + ${ans} = ${target}.`;
-    return { text, answer: ans, choices: makeChoices(ans), hint, explain };
-  }
-
-  function qPlace(diff){
-    const digits = diff<=2? (diff===1? 2:3) : 4;
-    const n = Math.floor(Math.random() * Math.pow(10,digits-1)*9) + Math.pow(10,digits-1);
-    const ask = ['ones','tens','hundreds','thousands'][rand(Math.min(4,digits))];
-    const placeVal = (p=>{ if(p==='ones') return n%10; if(p==='tens') return Math.floor(n/10)%10; if(p==='hundreds') return Math.floor(n/100)%10; if(p==='thousands') return Math.floor(n/1000)%10; }) (ask);
-    const value = placeVal * (ask==='ones'?1: ask==='tens'?10: ask==='hundreds'?100:1000);
-    const text = diff<5 ? `In ${n}, what digit is in the ${ask} place?` : `In ${n}, what is the value of the ${ask} digit?`;
-    const ans = diff<5? placeVal : value;
-    const hint = `Write ${n} in expanded form.`;
-    const explain = `${n} = ${Math.floor(n/1000)%10*1000} + ${Math.floor(n/100)%10*100} + ${Math.floor(n/10)%10*10} + ${n%10}.`;
-    return { text, answer: ans, choices: makeChoices(ans), hint, explain };
-  }
-
-  function qTables(diff){
-    let a,b,ans; do{ a = clamp(rand(12),1,12); b = diff<=2? clamp(rand(6),1,6) : clamp(rand(12),1,12); ans = a*b; } while(ans>100);
-    const text = `Times tables: ${a} × ${b} = ?`;
-    const hint = `Skip-count: ${Array(b).fill(a).map((v,i)=> (i+1)*a).join(', ')}`;
