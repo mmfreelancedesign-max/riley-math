@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Riley's Pink Math Playground</title>
 <!-- Defensive CSP: keep inline allowed for this single-file app; block remote connections by default -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' data: blob:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' data: blob:; style-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' data: blob:;">
 
 <!-- EARLY SAFETY GUARD: catch MetaMask/Web3 errors ASAP (before anything else runs) -->
 <script>
